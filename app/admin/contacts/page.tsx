@@ -64,7 +64,7 @@ export default function ContactsPage() {
       <div style={{ background: '#1a1f2e', borderBottom: '1px solid #2a3050', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 20 }}>🤖</span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>安安特助後台</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>{profile.assistantName}後台</span>
           <span style={{ background: '#2a3050', borderRadius: 20, padding: '3px 12px', fontSize: 12, color: '#9ba3c2' }}>
             共 {total} 筆聯絡人
           </span>

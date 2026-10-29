@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { profile } from '@/config/profile'
 
 export default function LoginPage() {
   const [pw, setPw] = useState('')
@@ -30,7 +31,7 @@ export default function LoginPage() {
       <div style={{ background: '#1a1f2e', borderRadius: 16, padding: '48px 40px', width: 360, boxShadow: '0 4px 32px rgba(0,0,0,0.5)' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>🤖</div>
-          <h1 style={{ color: '#fff', fontSize: 20, fontWeight: 600, margin: 0 }}>安安特助後台</h1>
+          <h1 style={{ color: '#fff', fontSize: 20, fontWeight: 600, margin: 0 }}>{profile.assistantName}後台</h1>
           <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>請輸入後台密碼</p>
         </div>
         <form onSubmit={handleLogin}>

@@ -10,7 +10,7 @@
 
 ## 這是什麼
 
-一個 LINE 機器人：拍名片 → AI 辨識 → 自動建檔 → 提醒跟進 → 匯出名單。
+給 B2B 業務用的 LINE 機器人：拍名片 → AI 辨識 → 自動建檔 → 重複自動合併 → 提醒跟進 → 匯出名單。
 
 技術棧：Next.js（App Router）+ Firebase（Firestore 與 Storage）+ OpenAI + LINE Messaging API，部署在 Vercel。
 
@@ -22,11 +22,11 @@
 
 **不要憑空填設定。** 先問使用者這五件事，問完再動手：
 
-1. 你是做什麼的？提供什麼服務？
-2. 你想找什麼樣的客戶或合作對象？
-3. 你平常在哪些場合收到名片？（商會、展覽、客戶拜訪⋯⋯）
+1. 你公司賣什麼？產品或服務是什麼？
+2. 你想找什麼樣的客戶？（產業、公司規模、哪個部門的窗口）
+3. 你平常在哪些場合收名片？（展覽、商會、客戶拜訪、協會活動⋯⋯）
 4. 你希望名片怎麼分類？想得到的就講，想不到我給預設
-5. 有沒有特別想推廣的副業、產品線或平台？（沒有就跳過）
+5. 有沒有特別想推的產品線或代理品牌？（沒有就跳過）
 
 問題四五使用者答不出來時，用預設值往下走，不要卡在這裡反覆追問。
 
@@ -55,6 +55,7 @@
 | `lib/event-matching.ts` | 場合判定邏輯，有 15 個測試在保護 |
 | `lib/expo-report.ts` | 跟進排序邏輯，有測試在保護 |
 | `lib/csv.ts` | 含 UTF-8 BOM 與公式注入防護，改壞會讓 Excel 亂碼或產生資安漏洞 |
+| `lib/contact-merge.ts` | 去重規則，有 24 個測試在保護。特別是「只有公司電話相同不處理」那條，放寬會產生永久性的誤判提示 |
 | `lib/cron-auth.ts` | 環境變數未設定時 fail closed，不要改成放行 |
 | `lib/admin-session.ts` | 後台登入的 HMAC 與常數時間比對 |
 
@@ -121,7 +122,7 @@ npm run build     # 應該 Compiled successfully
 config/profile.ts          ← 唯一要客製的檔案
 lib/
   card-analyzer.ts         名片 OCR 與 CRM 評估（由 profile 驅動）
-  agent.ts                 對話大腦，16 個工具
+  agent.ts                 對話大腦，19 個工具
   contact-service.ts       Firestore 資料層
   event-matching.ts        從日曆判定「在哪認識的」（純函式）
   expo-mode.ts             展場模式狀態
@@ -129,12 +130,16 @@ lib/
   drafts.ts                批次起草跟進訊息
   csv.ts                   名單匯出（純函式）
   flex.ts                  LINE 卡片組裝（純函式）
+  contact-merge.ts         重複名片的判斷與合併計畫（純函式）
+  error-log.ts             例外寫進 Firestore，後台讀得到
   batch.ts                 限流並行加時間預算（純函式）
   dedup.ts                 事件去重，避免 LINE 重送造成重複建檔
   line-client.ts           LINE API 封裝
   richmenu.ts              圖文選單定義
 app/api/line/webhook/      LINE 進入點
-app/api/cron/daily-briefing/  每日跟進提醒
+app/api/cron/daily-briefing/  每日跟進提醒，順便清過期錯誤紀錄
+app/api/admin/errors/      讀錯誤紀錄
+app/api/admin/validate-flex/  用 LINE 官方端點驗證卡片格式
 app/admin/                 後台（列表、編輯、匯出 Excel）
 scripts/generate-richmenu.py  產生選單底圖
 ```
@@ -151,12 +156,22 @@ scripts/generate-richmenu.py  產生選單底圖
 辨識錯誤真正的代價不是會錯，是使用者當下不知道它錯了。
 原圖擺在解析結果旁邊，錯誤當場看得出來。不要為了版面乾淨拿掉。
 
+**動到 Flex 卡片就要在 `/api/admin/validate-flex` 加對應的案例。**
+不是「部署後跑一次既有的驗證」，那擋不住新增的分支。
+曾經有一個 `inputOption` 寫了 LINE 不存在的值，整張卡片被退 400，
+使用者只看到「發生錯誤」，而名片其實已經建檔成功。卡片上線十一天才第一次被真的用到。
+能用測試守門的就寫測試（測試會跟著程式碼一起被迫更新），驗證端點補測試驗不到的 LINE 規格。
+
+**「手機相同但姓名不同」永遠不要改成自動合併。**
+同公司不同人共用總機或分機是真的會發生，實測資料裡就有。
+誤判一次，使用者就會開始忽略所有合併提示，真正的重複也跟著被忽略。
+
 **圖文選單有三顆按鈕刻意不走 AI。**
 「掃名片」是固定回覆，「找人」和「匯出名單」只叫出鍵盤。
 這省下 API 費用也省下十幾秒等待。不要為了統一而把它們改成走 agent。
 
 **批次處理的時間預算要比函式上限小很多。**
-`BATCH_DEADLINE_MS` 設 32 秒而函式上限 60 秒，不是算錯。
+`BATCH_BUDGET_MS` 設 32 秒而函式上限 60 秒，不是算錯。
 deadline 只擋「還沒開始」的工作，已經開跑的那張還要跑完，再加收尾推播。
 
 **OpenAI 客戶端一定要延遲建立。**

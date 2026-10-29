@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase-admin'
 import { pushMessage } from '@/lib/line-client'
 import { getPendingFollowUps } from '@/lib/contact-service'
 import { requireCronAuth } from '@/lib/cron-auth'
+import { purgeOldErrorLogs } from '@/lib/error-log'
 
 /**
  * 每日跟進提醒（台灣時間早上 8 點，排程設定在 vercel.json）。
@@ -57,6 +58,14 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 順手清掉過期的錯誤紀錄，失敗不影響早報本身
+  let errorLogsPurged = 0
+  try {
+    errorLogsPurged = await purgeOldErrorLogs()
+  } catch (err) {
+    console.error('purgeOldErrorLogs failed:', err)
+  }
+
   const failed = results.filter(r => r.error).length
-  return NextResponse.json({ ok: failed === 0, users: results.length, failed, results })
+  return NextResponse.json({ ok: failed === 0, users: results.length, failed, errorLogsPurged, results })
 }

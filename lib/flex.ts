@@ -126,6 +126,10 @@ export interface ScanCardData {
   followUpDate: string
   uncertainLabels: string[]
   expoIndex: number
+  /** 併進既有名片時，這次合併改了什麼。有值卡片就顯示「已併入」而不是「已建檔」 */
+  mergedChanges?: string[]
+  /** 手機撞號但姓名不同的既有名片，卡片上給一個「是同一人嗎」的按鈕 */
+  suggestMerge?: { contactId: string; name: string; company: string } | null
 }
 
 // OCR 回報的欄位英文名轉成卡片上看得懂的中文
@@ -159,9 +163,40 @@ export function scanResultBubble(c: ScanCardData) {
     c.expoIndex === 0 && c.followUpDate ? infoRow('跟進', c.followUpDate) : null,
   ].filter(Boolean)
 
+  // 合併過一定要在最上面講出來。
+  // 不講的話使用者會以為「我剛掃的那張不見了」，而名單數量也沒增加，看起來像壞掉。
+  const merged = (c.mergedChanges?.length ?? 0) > 0
   const header = c.expoIndex > 0
-    ? { type: 'text', text: `📇 第 ${c.expoIndex} 張`, size: 'xs', color: '#AAAAAA' }
-    : { type: 'text', text: '✅ 名片已建檔', size: 'xs', color: '#1DB446' }
+    ? { type: 'text', text: merged ? `♻️ 第 ${c.expoIndex} 張｜併入既有` : `📇 第 ${c.expoIndex} 張`,
+        size: 'xs', color: merged ? '#B26A00' : '#AAAAAA' }
+    : { type: 'text', text: merged ? '♻️ 這個人已經有了，已併入既有名片' : '✅ 名片已建檔',
+        size: 'xs', color: merged ? '#B26A00' : '#1DB446' }
+
+  // 合併改了什麼要列出來，否則「已併入」只是一句話，使用者無法判斷有沒有弄錯
+  const mergeBox = merged
+    ? [{
+        type: 'box', layout: 'vertical', margin: 'md', paddingAll: 'sm',
+        backgroundColor: '#EEF6FF', cornerRadius: 'md',
+        contents: [
+          { type: 'text', text: `這次補上：${c.mergedChanges!.join('、')}`,
+            size: 'xxs', color: '#2A5C8A', wrap: true },
+        ],
+      }]
+    : []
+
+  // 手機撞號但姓名不同：不自動合併，因為同公司不同人共用號碼是真的會發生。
+  // 但要在卡片上問，因為現場記憶最清楚的時候判斷最準，隔幾天就想不起來了。
+  const suggestBox = c.suggestMerge
+    ? [{
+        type: 'box', layout: 'vertical', margin: 'md', paddingAll: 'sm',
+        backgroundColor: '#FFF4E5', cornerRadius: 'md',
+        contents: [
+          { type: 'text', text: `⚠️ 手機跟「${clip(c.suggestMerge.name, 12)}」${c.suggestMerge.company ? `（${clip(c.suggestMerge.company, 14)}）` : ''}一樣`,
+            size: 'xs', color: '#B26A00', wrap: true },
+          { type: 'text', text: '同一人就按下方合併，不同人可以不管', size: 'xxs', color: '#B26A00', margin: 'xs' },
+        ],
+      }]
+    : []
 
   // 不確定欄位做成明顯的警示區塊，不是藏在小字裡
   const warning = c.uncertainLabels.length > 0
@@ -186,18 +221,37 @@ export function scanResultBubble(c: ScanCardData) {
       }]
     : []
 
+  // ⚠️ inputOption 只能用 LINE 列的四個值，寫錯整則訊息會被退 400。
+  //
+  // 合法值只有 closeRichMenu、openRichMenu、openKeyboard、openVoice。
+  // 這裡曾經寫成不存在的 'closeKeyboard'，結果 LINE 把整張卡片退件，
+  // 使用者只看到「發生錯誤」，名片其實已經建檔成功了。LINE 回的訊息是
+  //   invalid property: /footer/contents/1/action/inputOption
+  // 「invalid property」指的是值不合法，不是這個屬性不能用。
+  // 用 /api/admin/validate-flex 的探針確認過：Flex 按鈕吃 inputOption 也吃 fillInText。
+  //
+  // 三個按鈕都用 openKeyboard：按下去鍵盤就跳出來，可以直接打，不必再點一次輸入框。
   const buttons = [
     phone
       ? { type: 'button', style: 'primary', height: 'sm', color: '#1DB446',
           action: { type: 'uri', label: '📞 撥號', uri: telUri(phone) } }
       : null,
     { type: 'button', style: 'secondary', height: 'sm',
-      action: { type: 'postback', label: '✏️ 修正名字', data: `correct_name:${c.contactId}`, inputOption: 'closeKeyboard' } },
+      action: { type: 'postback', label: '✏️ 修正名字', data: `correct_name:${c.contactId}`,
+                inputOption: 'openKeyboard' } },
     { type: 'button', style: 'link', height: 'sm',
-      action: { type: 'postback', label: '🏢 修正公司', data: `correct_company:${c.contactId}`, inputOption: 'closeKeyboard' } },
+      action: { type: 'postback', label: '🏢 修正公司', data: `correct_company:${c.contactId}`,
+                inputOption: 'openKeyboard' } },
+    // fillInText 的「場合名稱：」前綴由 webhook 的 /^場合名稱：?(.+)$/ 剝掉
     { type: 'button', style: 'link', height: 'sm',
       action: { type: 'postback', label: '📍 改場合', data: `src_other:${c.contactId}`,
                 inputOption: 'openKeyboard', fillInText: '場合名稱：' } },
+    // 合併是把新掃的這筆併進既有那筆，所以 primary 是既有的 id
+    c.suggestMerge
+      ? { type: 'button', style: 'secondary', height: 'sm',
+          action: { type: 'postback', label: '🔗 是同一人，合併',
+                    data: `merge:${c.suggestMerge.contactId}:${c.contactId}` } }
+      : null,
   ].filter(Boolean)
 
   const bubble: Record<string, unknown> = {
@@ -210,6 +264,8 @@ export function scanResultBubble(c: ScanCardData) {
         { type: 'text', text: clip(c.name || '（辨識不出姓名）', 20), weight: 'bold', size: 'lg', wrap: true },
         { type: 'text', text: clip(c.company || '（未填公司）', 30), size: 'sm', color: '#888888', wrap: true },
         ...scoreRow,
+        ...mergeBox,
+        ...suggestBox,
         ...warning,
         ...(rows.length ? [{ type: 'separator', margin: 'md' }] : []),
         ...(rows.length ? [{ type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm', contents: rows }] : []),
@@ -245,4 +301,118 @@ export function scanResultMessage(c: ScanCardData) {
     altText: clip(`${prefix}${c.name}${c.company ? `（${c.company}）` : ''}`, MAX_ALT),
     contents: scanResultBubble(c),
   }
+}
+
+// ── 重複名片卡片（2026-10-29） ───────────────────────────────
+//
+// 原本「檢查重複」是回一段文字，要使用者打「合併 1,2,5」。
+// 編號跟人名的對應要自己在腦中維持，而且判斷錯了只能重打一次。
+// 一組一張卡片，兩顆按鈕按完就結束，不用打字也不會對錯編號。
+
+export interface DuplicateCardData {
+  /** 'auto' 是姓名與電話都相同，'suggest' 是手機撞號但姓名不同 */
+  verdict: 'auto' | 'suggest'
+  primaryId: string
+  secondaryId: string
+  primaryName: string
+  secondaryName: string
+  primaryWhen: string
+  secondaryWhen: string
+  company: string
+  phone: string
+  /** 主檔已經有的場合與筆記數，讓使用者知道合併會保留什麼 */
+  primarySource: string
+  primaryNoteCount: number
+}
+
+export function duplicateBubble(d: DuplicateCardData) {
+  const confident = d.verdict === 'auto'
+
+  const nameRow = (label: string, name: string, when: string) => ({
+    type: 'box', layout: 'baseline', spacing: 'sm',
+    contents: [
+      { type: 'text', text: label, color: '#AAAAAA', size: 'xs', flex: 2 },
+      { type: 'text', text: clip(name, 14), color: '#333333', size: 'sm', flex: 5, wrap: true },
+      { type: 'text', text: when, color: '#AAAAAA', size: 'xxs', flex: 2, align: 'end' },
+    ],
+  })
+
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        {
+          type: 'text',
+          text: confident ? '✅ 姓名與電話都相同' : '❓ 手機相同但姓名不同',
+          size: 'xs',
+          color: confident ? '#1DB446' : '#B26A00',
+          weight: 'bold',
+        },
+        ...(d.company
+          ? [{ type: 'text', text: clip(d.company, 28), size: 'xs', color: '#888888', wrap: true }]
+          : []),
+        { type: 'separator', margin: 'md' },
+        {
+          type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm',
+          contents: [
+            nameRow('保留', d.primaryName || '（無名）', d.primaryWhen),
+            nameRow('併入', d.secondaryName || '（無名）', d.secondaryWhen),
+            ...(d.phone ? [{
+              type: 'box', layout: 'baseline', spacing: 'sm',
+              contents: [
+                { type: 'text', text: '電話', color: '#AAAAAA', size: 'xs', flex: 2 },
+                { type: 'text', text: clip(d.phone, 24), color: '#666666', size: 'sm', flex: 7, wrap: true },
+              ],
+            }] : []),
+          ],
+        },
+        // 合併會保留什麼要先講，不然使用者不敢按
+        {
+          type: 'box', layout: 'vertical', margin: 'md', paddingAll: 'sm',
+          backgroundColor: confident ? '#F2FAF5' : '#FFF4E5', cornerRadius: 'md',
+          contents: [
+            {
+              type: 'text',
+              text: `合併後保留上面那筆${d.primarySource && d.primarySource !== '其他' ? `（場合：${clip(d.primarySource, 12)}）` : ''}` +
+                    `${d.primaryNoteCount ? `，${d.primaryNoteCount} 則筆記都留著` : ''}`,
+              size: 'xxs', color: confident ? '#2E7D4F' : '#B26A00', wrap: true,
+            },
+            {
+              type: 'text', text: '按錯了可以跟我說「還原」，名片不會被刪除',
+              size: 'xxs', color: '#AAAAAA', margin: 'xs', wrap: true,
+            },
+          ],
+        },
+      ],
+    },
+    footer: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        {
+          type: 'button', style: 'primary', height: 'sm',
+          color: confident ? '#1DB446' : '#F5A623',
+          action: { type: 'postback', label: '🔗 合併成一筆',
+                    data: `merge:${d.primaryId}:${d.secondaryId}`,
+                    displayText: `合併 ${d.primaryName}` },
+        },
+        {
+          type: 'button', style: 'link', height: 'sm',
+          action: { type: 'postback', label: '✋ 不是同一人',
+                    data: `notdup:${d.primaryId}:${d.secondaryId}`,
+                    displayText: `${d.primaryName} 跟 ${d.secondaryName} 不是同一人` },
+        },
+      ],
+    },
+  }
+}
+
+export function duplicateCarousel(groups: DuplicateCardData[]) {
+  // LINE 的 carousel 上限 12 張，超過的留到下一次「檢查重複」再處理
+  const picked = groups.slice(0, 12)
+  const altText = clip(`${picked.length} 組可能重複的名片待處理`, MAX_ALT)
+  return picked.length === 1
+    ? { type: 'flex', altText, contents: duplicateBubble(picked[0]) }
+    : { type: 'flex', altText, contents: { type: 'carousel', contents: picked.map(duplicateBubble) } }
 }

@@ -8,6 +8,8 @@
 // - message：直接送一句話給 agent 處理（自然語言理解，能查資料）
 // - postback：不需要 AI 判斷的固定動作，或需要叫出鍵盤讓使用者補字（省一次 API 費用）
 
+import { profile } from '../config/profile'
+
 const LINE_API = 'https://api.line.me/v2/bot'
 const LINE_DATA_API = 'https://api-data.line.me/v2/bot'
 
@@ -17,7 +19,7 @@ const CH = 843      // 1686 / 2
 export const RICH_MENU = {
   size: { width: 2500, height: 1686 },
   selected: true,
-  name: '安安特助選單 v2',
+  name: `${profile.assistantName}選單`,
   chatBarText: '📋 打開選單',
   areas: [
     // 上排

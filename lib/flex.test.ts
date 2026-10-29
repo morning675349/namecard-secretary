@@ -4,7 +4,7 @@ import { contactBubble, contactCarousel, telUri } from './flex.ts'
 
 const base = {
   contactId: 'abc123', name: '林志明', company: '大展精密工業', title: '總經理',
-  score: 8, category: '潛在客戶', status: '待跟進', source: 'BNI 台中南區例會',
+  score: 8, category: '潛在客戶', status: '待跟進', source: '商會早餐例會',
   lastNote: '想做官網，預算約三十萬', mobile: '0912-345-678', officePhone: '04-2222-3333',
 }
 

@@ -74,7 +74,7 @@ export function pickBestEvent(events: calendar_v3.Schema$Event[], at: Date): Mat
 
     // 同分時取「最晚開始」的那個：兩個行程重疊時，你最近走進去的才是現在人在的場合。
     // 實例：10/21 早上 早餐例會 06:30-09:30 與產業展覽 08:00-18:00 重疊，
-    // 08:30 掃的名片應該算產業展覽，不是先開始的 BNI。
+    // 08:30 掃的名片應該算產業展覽，不是先開始的早餐例會。
     // 反過來也成立：展期中 14:00 的洽談會贏過整天的展覽，因為洽談才是認識對方的場合。
     if (!best || score > best.score || (score === best.score && startMs > best.startMs)) {
       best = { score, startMs, event: { title, location: e.location?.trim() || '', when, isAllDay } }

@@ -13,6 +13,7 @@ import { uploadCardImage } from '@/lib/storage'
 import { db } from '@/lib/firebase-admin'
 import {
   saveContact, updateContactSource, updateContactField, addContactNote,
+  findMergeForNewCard, mergeContactPair, refreshFollowUp, dismissMergePair,
   getContactById, updateContactStatus,
   setPendingSource, consumePendingSource, getLatestContact,
   setPendingCorrection, consumePendingCorrection,
@@ -22,6 +23,7 @@ import { claimEvent } from '@/lib/dedup'
 import { getExpoMode, bumpExpoCount, ExpoMode } from '@/lib/expo-mode'
 import { runBatch } from '@/lib/batch'
 import { appendSystemNote } from '@/lib/conversation'
+import { logError } from '@/lib/error-log'
 import { profile } from '@/config/profile'
 
 // 一疊名片一起傳進來時，留多少時間給收尾推播。
@@ -82,6 +84,10 @@ type ScanResult = {
   contactId: string
   imageUrl: string
   source: string
+  /** 併進既有名片時，這筆合併改了什麼。空陣列代表沒有合併 */
+  mergedChanges: string[]
+  /** 手機撞號但姓名不同的既有名片，要問使用者是不是同一人 */
+  suggestMerge: { contactId: string; name: string; company: string } | null
 }
 
 /** 掃一張名片並建檔，場合優先用展場模式宣告的名稱，其次才問日曆 */
@@ -116,37 +122,98 @@ async function scanCard(
     source = matched.title
   }
 
-  return { card, contactId, imageUrl, source }
+  // 去重：姓名與電話都對得上就併進既有那筆，不留兩筆。
+  //
+  // 刻意「先建檔再合併」而不是「先查再決定要不要建檔」：
+  //   1. 合併邏輯只有一套（lib/contact-merge.ts 的 planMerge），有測試，不必再寫一條分支
+  //   2. 被併掉的那筆是軟刪除，所以這次的辨識結果會留著。
+  //      同一個人的名片被掃兩次等於做了兩次獨立辨識，之後要核對名字時這是唯一的對照來源
+  const { auto, suggest } = await findMergeForNewCard(lineUserId, card, contactId)
+  let mergedChanges: string[] = []
+  let finalId = contactId
+  if (auto?.id) {
+    const merged = await mergeContactPair(lineUserId, auto.id, contactId)
+    if (merged.ok) {
+      mergedChanges = merged.changes
+      finalId = merged.survivingId
+      // 合併後卡片上的場合要顯示活著那筆的場合，不是這次掃到的
+      source = auto.source && auto.source !== '其他' ? auto.source : source
+      // 又遇到同一個人，跟進日期從今天重算。
+      // 不重算的話主檔留著舊日期，而卡片顯示「今天＋這次建議的天數」，兩者對不上。
+      await refreshFollowUp(lineUserId, finalId, card.followUpDays)
+      mergedChanges.push('跟進日期重新排')
+    }
+  }
+
+  const first = suggest[0]
+  const suggestMerge = !auto && first?.id
+    ? { contactId: first.id, name: first.nameZh || first.nameEn || '', company: first.company || '' }
+    : null
+
+  return { card, contactId: finalId, imageUrl, source, mergedChanges, suggestMerge }
 }
 
-function cardLine(card: ScanResult['card'], index?: number): string {
+function cardLine(card: ScanResult['card'], index?: number, merged = false): string {
   const name = card.nameZh || card.nameEn || '未知'
   const company = card.company ? `（${card.company}）` : ''
   const prefix = index === undefined ? '' : `${index}. `
   // 批次摘要沒有名片縮圖可以核對，所以至少要標出哪幾張辨識沒把握
   const warn = card.uncertainFields?.length ? ' ⚠️' : ''
-  return `${prefix}${name}${company} ⭐${card.score}/10 ${card.category}${warn}`
+  // 併入既有的也要標，否則使用者數「我掃了 12 張但名單只多 9 筆」會以為掉了三張
+  const mark = merged ? ' ♻️併入' : ''
+  return `${prefix}${name}${company} ⭐${card.score}/10 ${card.category}${warn}${mark}`
 }
 
 async function sendScanCard(lineUserId: string, r: ScanResult, expoIndex: number) {
   const followUpDate = new Date()
   followUpDate.setDate(followUpDate.getDate() + r.card.followUpDays)
+  const followUpStr = followUpDate.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' })
+  const uncertain = uncertainLabelsOf(r.card.uncertainFields || [])
 
-  await pushFlex(lineUserId, scanResultMessage({
-    contactId: r.contactId,
-    imageUrl: r.imageUrl,
-    name: r.card.nameZh || r.card.nameEn || '',
-    company: r.card.company || '',
-    title: r.card.title || '',
-    mobile: r.card.mobile || r.card.officePhone || '',
-    email: r.card.email || '',
-    source: r.source,
-    score: r.card.score ?? 0,
-    category: r.card.category || '',
-    followUpDate: followUpDate.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric' }),
-    uncertainLabels: uncertainLabelsOf(r.card.uncertainFields || []),
-    expoIndex,
-  }))
+  // 卡片一旦被 LINE 拒收就會丟例外，但名片其實已經建檔成功了。
+  // 不能因為「顯示方式」失敗就讓使用者以為整張掃失敗，所以退回純文字摘要。
+  try {
+    await pushFlex(lineUserId, scanResultMessage({
+      contactId: r.contactId,
+      imageUrl: r.imageUrl,
+      name: r.card.nameZh || r.card.nameEn || '',
+      company: r.card.company || '',
+      title: r.card.title || '',
+      mobile: r.card.mobile || r.card.officePhone || '',
+      email: r.card.email || '',
+      source: r.source,
+      score: r.card.score ?? 0,
+      category: r.card.category || '',
+      followUpDate: followUpStr,
+      uncertainLabels: uncertain,
+      expoIndex,
+      mergedChanges: r.mergedChanges,
+      suggestMerge: r.suggestMerge,
+    }))
+  } catch (err) {
+    await logError('scan.pushFlex', err, {
+      contactId: r.contactId,
+      hasHeroImage: !!r.imageUrl,
+      merged: r.mergedChanges.length > 0,
+      hasSuggest: !!r.suggestMerge,
+      uncertainCount: uncertain.length,
+    })
+    const lines = [
+      r.mergedChanges.length
+        ? (expoIndex > 0 ? `♻️ 第 ${expoIndex} 張｜併入既有名片` : '♻️ 這個人已經有了，已併入既有名片')
+        : (expoIndex > 0 ? `📇 第 ${expoIndex} 張` : '✅ 名片已建檔'),
+      r.mergedChanges.length ? `這次補上：${r.mergedChanges.join('、')}` : '',
+      r.suggestMerge ? `⚠️ 手機跟「${r.suggestMerge.name}」一樣，同一人的話跟我說「合併」` : '',
+      cardLine(r.card),
+      r.card.title ? `職稱：${r.card.title}` : '',
+      (r.card.mobile || r.card.officePhone) ? `電話：${r.card.mobile || r.card.officePhone}` : '',
+      r.card.email ? `Email：${r.card.email}` : '',
+      r.source ? `場合：${r.source}` : '場合：⚠️ 未判定',
+      expoIndex === 0 ? `跟進：${followUpStr}` : '',
+      uncertain.length ? `⚠️ 這幾欄沒把握：${uncertain.join('、')}` : '',
+    ].filter(Boolean)
+    await pushMessage(lineUserId, lines.join('\n'))
+  }
 }
 
 /**
@@ -172,7 +239,8 @@ async function handleImageMessage(messageId: string, replyToken: string, lineUse
   const displayName = result.card.nameZh || result.card.nameEn || '未知'
   appendSystemNote(
     lineUserId,
-    `剛掃描了一張名片並建檔：${displayName}（${result.card.company}）${result.source ? `，場合是「${result.source}」` : '，場合尚未判定'}`
+    `剛掃描了一張名片並${result.mergedChanges.length ? '併入既有聯絡人' : '建檔'}：` +
+    `${displayName}（${result.card.company}）${result.source ? `，場合是「${result.source}」` : '，場合尚未判定'}`
   ).catch(err => console.error('Conversation note failed:', err))
 }
 
@@ -199,15 +267,19 @@ async function handleBatchImages(
   }
 
   const uncertainCount = outcome.done.filter(({ result }) => result.card.uncertainFields?.length).length
+  const mergedCount = outcome.done.filter(({ result }) => result.mergedChanges.length > 0).length
+  const suggestCount = outcome.done.filter(({ result }) => result.suggestMerge).length
 
   const lines = [
     `✅ 批次掃描完成！共 ${outcome.done.length} 張名片`,
+    ...(mergedCount > 0 ? [`♻️ ${mergedCount} 張是已經有的人，已併入既有名片`] : []),
+    ...(suggestCount > 0 ? [`❓ ${suggestCount} 張手機跟既有名片撞號但姓名不同，說「檢查重複」我列給你看`] : []),
     ...(outcome.failed.length > 0 ? [`⚠️ ${outcome.failed.length} 張分析失敗`] : []),
     ...(outcome.skipped.length > 0 ? [`⏳ ${outcome.skipped.length} 張因處理時間不足未完成，請再傳一次`] : []),
     ...(matched ? [`📍 場合：${matched.title}（已自動記錄）`] : []),
     ...(expo ? [`📍 場合：${expo.source}（展場模式）`] : []),
     '',
-    ...outcome.done.map(({ result }, i) => cardLine(result.card, i + 1)),
+    ...outcome.done.map(({ result }, i) => cardLine(result.card, i + 1, result.mergedChanges.length > 0)),
     '',
     ...(uncertainCount > 0
       ? [`⚠️ 有 ${uncertainCount} 張辨識沒把握（標 ⚠️ 的），建議回頭看一下名片原圖`]
@@ -259,6 +331,33 @@ async function handlePostback(data: string, replyToken: string, lineUserId: stri
     const [, source, contactId] = srcMatch
     const ok = await updateContactSource(lineUserId, contactId, source)
     await replyMessage(replyToken, ok ? `✅ 已記錄場合：${source}` : '⚠️ 找不到這筆聯絡人')
+    return
+  }
+
+  // 合併：primary 是既有那筆（較早建檔），secondary 是剛掃的這筆。
+  // 順序顛倒會把舊的場合與筆記併進新的那筆，等於把累積的資訊丟掉。
+  const mergeMatch = data.match(/^merge:(\w+):(\w+)$/)
+  if (mergeMatch) {
+    const result = await mergeContactPair(lineUserId, mergeMatch[1], mergeMatch[2])
+    await replyMessage(
+      replyToken,
+      result.ok
+        ? `♻️ 已合併成一筆${result.changes.length ? `\n這次補上：${result.changes.join('、')}` : '\n兩筆內容相同，沒有需要補的欄位'}`
+        : `⚠️ 合併沒有完成：${result.reason || '未知原因'}`
+    )
+    return
+  }
+
+  // 「不是同一人」：記下來，下次檢查重複不再問同一組
+  const notDupMatch = data.match(/^notdup:(\w+):(\w+)$/)
+  if (notDupMatch) {
+    const ok = await dismissMergePair(lineUserId, notDupMatch[1], notDupMatch[2])
+    await replyMessage(
+      replyToken,
+      ok
+        ? '👌 記住了，這兩筆是不同的人，以後檢查重複不會再問這一組'
+        : '⚠️ 找不到這兩筆名片，可能已經被合併或刪掉了'
+    )
     return
   }
 
@@ -356,7 +455,7 @@ export async function POST(req: NextRequest) {
       }
       if (fresh.length > 0) await handleBatchImages(fresh, lineUserId)
     } catch (err) {
-      console.error('Batch image error:', err)
+      await logError('webhook.batchImage', err)
       await notifyFailureQuietly('', lineUserId, '⚠️ 批次掃描發生錯誤，請稍後再試')
     }
   } else if (imageEvents.length === 1) {
@@ -367,7 +466,7 @@ export async function POST(req: NextRequest) {
         await handleImageMessage(e.message.id, e.replyToken, lineUserId)
       }
     } catch (err) {
-      console.error('Image handling error:', err)
+      await logError('webhook.image', err)
       await notifyFailureQuietly(e.replyToken, lineUserId, '⚠️ 發生錯誤，請稍後再試')
     }
   }
@@ -385,7 +484,7 @@ export async function POST(req: NextRequest) {
         await handlePostback(event.postback.data, replyToken, lineUserId)
       }
     } catch (err) {
-      console.error('Event handling error:', err)
+      await logError('webhook.event', err, { eventType: event.type })
       const msg = !process.env.OPENAI_API_KEY
         ? '⚠️ AI 引擎尚未設定（缺少 OPENAI_API_KEY），請到環境變數補上'
         : '⚠️ 發生錯誤，請稍後再試'

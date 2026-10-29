@@ -18,19 +18,19 @@ const allDay = (summary: string, start: string, end: string, location = '') => (
 const at = (iso: string) => new Date(iso)
 
 test('活動進行中：早餐例會 07:00-09:00，07:45 掃名片', () => {
-  const events = [timed('BNI 台中南區例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00', '台中林酒店')]
+  const events = [timed('商會早餐例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00', '台中林酒店')]
   const m = pickBestEvent(events, at('2026-07-29T07:45:00+08:00'))
-  assert.equal(m?.title, 'BNI 台中南區例會')
+  assert.equal(m?.title, '商會早餐例會')
   assert.equal(m?.location, '台中林酒店')
 })
 
 test('剛散會：09:00 結束，09:30 才掃', () => {
-  const events = [timed('BNI 台中南區例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00')]
-  assert.equal(pickBestEvent(events, at('2026-07-29T09:30:00+08:00'))?.title, 'BNI 台中南區例會')
+  const events = [timed('商會早餐例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00')]
+  assert.equal(pickBestEvent(events, at('2026-07-29T09:30:00+08:00'))?.title, '商會早餐例會')
 })
 
 test('隔太久不算：09:00 結束，下午 14:00 才掃', () => {
-  const events = [timed('BNI 台中南區例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00')]
+  const events = [timed('商會早餐例會', '2026-07-29T07:00:00+08:00', '2026-07-29T09:00:00+08:00')]
   assert.equal(pickBestEvent(events, at('2026-07-29T14:00:00+08:00')), null)
 })
 
@@ -103,7 +103,7 @@ test('重疊行程同分時取最晚開始的（產業展覽 vs 當天稍早的 
   assert.equal(pickBestEvent(events, at('2026-10-21T08:30:00+08:00'))?.title, '產業展覽')
 })
 
-test('早餐例會時段內（產業展覽還沒開始）仍算 BNI', () => {
+test('早餐例會時段內（產業展覽還沒開始）仍算早餐例會', () => {
   const events = [
     timed('早餐例會', '2026-10-21T06:30:00+08:00', '2026-10-21T09:30:00+08:00'),
     timed('產業展覽', '2026-10-21T08:00:00+08:00', '2026-10-21T18:00:00+08:00'),

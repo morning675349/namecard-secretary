@@ -104,22 +104,36 @@ https://你的vercel網址/api/line/webhook
 
 ## 步驟 8：上架圖文選單
 
-1. 本機產生選單底圖：
+**底圖已經附在 repo 裡**（`public/richmenu.png`），不用自己產，直接上架就好。
+
+1. 登入後台 `https://你的網址/admin`，用你設定的 `ADMIN_PASSWORD`
+2. 呼叫上架端點：
+
+```bash
+curl -X POST https://你的網址/api/admin/richmenu -H "Cookie: admin_token=從瀏覽器開發者工具複製"
+```
+
+成功之後回到 LINE，底部就會出現六格選單：掃名片、待跟進、找人、展場模式、名片統計、匯出名單。
+
+### 想改按鈕文字才需要重新產圖
 
 ```bash
 pip3 install pillow
 python3 scripts/generate-richmenu.py
 ```
 
-2. 把產生的 `public/richmenu.png` 一起 commit 並推上去，等 Vercel 部署完
-3. 登入後台 `https://你的網址/admin`，用你設定的 `ADMIN_PASSWORD`
-4. 呼叫上架端點：
+改按鈕文字要同時改兩個地方，兩邊的格數與順序必須一致，否則會按到錯的功能：
+
+- `scripts/generate-richmenu.py` 的 `CELLS`（底圖上的字）
+- `lib/richmenu.ts` 的 `areas`（按下去做什麼）
+
+產完圖要先 commit 推上去、等部署完成，再呼叫上架端點。**順序不能顛倒**，底圖是從線上抓的，沒先部署會傳到舊圖。
+
+找不到中文字型時（Windows 與部分 Linux 會遇到）用參數指定一套：
 
 ```bash
-curl -X POST https://你的網址/api/admin/richmenu -H "Cookie: admin_token=從瀏覽器開發者工具複製"
+python3 scripts/generate-richmenu.py --font-bold /path/to/中文字型.ttf
 ```
-
-> 順序不能顛倒：底圖是從線上抓的，沒先部署會傳到舊圖或失敗。
 
 ---
 
@@ -136,7 +150,26 @@ curl -X POST https://你的網址/api/admin/richmenu -H "Cookie: admin_token=從
 找 剛剛那家公司
 跟進
 統計
+檢查重複
 ```
+
+**把同一張名片再傳一次**，這次應該會看到「♻️ 這個人已經有了，已併入既有名片」，名單不會多一筆。這代表去重正常運作。
+
+### 出問題時先讀錯誤紀錄
+
+機器人回「發生錯誤」時，失敗原因會寫進資料庫，不用去翻 Vercel 的 log：
+
+```bash
+curl "https://你的網址/api/admin/errors?limit=5" -H "Cookie: admin_token=從瀏覽器開發者工具複製"
+```
+
+改過卡片版面之後，部署完可以先確認 LINE 收不收：
+
+```bash
+curl "https://你的網址/api/admin/validate-flex" -H "Cookie: admin_token=從瀏覽器開發者工具複製"
+```
+
+回傳的 `commit` 欄位是線上實際跑的版本，對得上你剛推的 commit 才算部署完成。
 
 ---
 
