@@ -10,7 +10,13 @@ export type { MatchedEvent }
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000 // 10 分鐘
 
 function getOAuth2Client() {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://line-secretary-m6ji.vercel.app'
+  // 這裡刻意不給預設網址。
+  // 填錯或沒填時，OAuth 會導向別人的網域然後失敗，而錯誤訊息完全看不出原因。
+  // 寧可在這裡明確報錯，也不要讓使用者去猜。
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+  if (!baseUrl) {
+    throw new Error('缺少環境變數 NEXT_PUBLIC_BASE_URL（你的正式網址，結尾不要加斜線），請參考 .env.example')
+  }
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,

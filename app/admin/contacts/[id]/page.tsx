@@ -1,9 +1,11 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import { profile } from '@/config/profile'
 
 const STATUSES = ['待跟進', '已聯絡', '已提案', '成交', '婉拒']
-const CATEGORIES = ['潛在客戶', 'BNI夥伴', '合作夥伴', '引薦來源', '待觀察']
+// 分類選項一律取自設定檔，改 config/profile.ts 後台就會跟著變
+const CATEGORIES = profile.categories
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

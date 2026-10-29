@@ -1,9 +1,11 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { profile } from '@/config/profile'
 
 const STATUS_OPTS = ['全部', '待跟進', '已聯絡', '已提案', '成交', '婉拒']
-const CATEGORY_OPTS = ['全部', '潛在客戶', 'BNI夥伴', '合作夥伴', '引薦來源', '待觀察']
+// 分類選項一律取自設定檔，改 config/profile.ts 後台就會跟著變
+const CATEGORY_OPTS = ['全部', ...profile.categories]
 const SCORE_COLOR = (s: number) => s >= 8 ? '#27ae60' : s >= 6 ? '#e67e22' : '#7f8c8d'
 const STATUS_COLOR: Record<string, string> = {
   '待跟進': '#e67e22', '已聯絡': '#3498db', '已提案': '#9b59b6', '成交': '#27ae60', '婉拒': '#1abc9c',
