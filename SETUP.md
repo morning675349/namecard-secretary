@@ -91,9 +91,12 @@ https://你的vercel網址/api/line/webhook
 
 ## 步驟 7：補上白名單與重新部署
 
-1. 用手機加機器人好友，隨便傳一則訊息
-2. 到 Vercel 的 **Logs** 找到你的 LINE userId（`U` 開頭的 33 碼）
-3. 填進環境變數 `ALLOWED_LINE_USER_IDS`
+先用一個假值把自己擋下來，log 就會直接印出你的 userId，不用在一堆訊息裡翻：
+
+1. 在 Vercel 環境變數把 `ALLOWED_LINE_USER_IDS` 先填成 `PLACEHOLDER`，重新部署
+2. 用手機加機器人好友，隨便傳一則訊息（你會收不到回覆，這是正常的）
+3. 到 Vercel 的 **Logs**，找 `Blocked non-allowlisted user: U...`，後面那串就是你的 userId（`U` 開頭 33 碼）
+4. 把 `PLACEHOLDER` 換成那串 userId
 
 > ⚠️ **這步不要省略。** 不設白名單等於任何人加好友都能用，燒的是你的 OpenAI 費用。
 
@@ -106,12 +109,17 @@ https://你的vercel網址/api/line/webhook
 
 **底圖已經附在 repo 裡**（`public/richmenu.png`），不用自己產，直接上架就好。
 
-1. 登入後台 `https://你的網址/admin`，用你設定的 `ADMIN_PASSWORD`
-2. 呼叫上架端點：
+把下面整段貼到終端機，把兩個地方換成你自己的，它會自動登入並上架：
 
 ```bash
-curl -X POST https://你的網址/api/admin/richmenu -H "Cookie: admin_token=從瀏覽器開發者工具複製"
+SITE="https://你的網址"; PW="你的ADMIN_PASSWORD"
+COOKIE=$(curl -s -i -X POST "${SITE}/api/admin/auth" -H "Content-Type: application/json" \
+  --data-binary "{\"password\":\"${PW}\"}" | grep -i '^set-cookie:' \
+  | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
+curl -s -X POST "${SITE}/api/admin/richmenu" -H "Cookie: ${COOKIE}"
 ```
+
+同一個 `${COOKIE}` 之後讀錯誤紀錄、驗證卡片都能用，終端機不要關。
 
 成功之後回到 LINE，底部就會出現六格選單：掃名片、待跟進、找人、展場模式、名片統計、匯出名單。
 

@@ -79,7 +79,7 @@ npm run build     # 應該 Compiled successfully
 **最常見的卡關點，先提醒他：**
 
 1. **Firebase 地區選錯**。Firestore 和 Storage 都要選 `asia-east1`，建立之後不能改
-2. **環境變數少填**。`.env.example` 裡 11 項全部必填，少一項就有功能無聲壞掉
+2. **環境變數少填**。`.env.example` 裡 13 項全部必填，少一項就有功能無聲壞掉
 3. **LINE 的 Auto-reply messages 要關閉**，否則罐頭訊息會蓋掉機器人的回覆
 4. **Vercel 改完環境變數要重新部署才生效**
 5. **`ALLOWED_LINE_USER_IDS` 一定要設**。不設等於任何人加好友都能用，燒的是使用者的 OpenAI 費用
