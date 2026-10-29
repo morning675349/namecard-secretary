@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 圖解手冊的原始截圖。裡面有 API 金鑰、服務帳戶信箱、token，
+# 絕對不可以進版控。標註並遮蔽過的成品放 docs/images/ 才 commit。
+docs/raw/
+*.grid.png
