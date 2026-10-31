@@ -72,17 +72,64 @@ npm run build     # 應該 Compiled successfully
 
 碰外部服務的部分（OCR、LINE、Firebase）沒有單元測試，只能部署後實測。
 
-### 第 5 步：引導部署
+### 第 5 步：帶著他部署，不是把文件丟給他
 
-照 [SETUP.md](SETUP.md) 一步一步帶使用者做。
+**你的角色是陪跑，不是唸稿。** 使用者看得懂文件的話就不需要你了。
 
-**最常見的卡關點，先提醒他：**
+照 [SETUP.md](SETUP.md) 的八個步驟走，但要照下面的方式帶：
+
+#### 帶跑的四條規則
+
+**一次只講一件事，然後停下來等。**
+不要一口氣把八個步驟貼給他。講完一步，問「做好了嗎」，等他回答再往下。
+他回「好了」才繼續，回「卡住了」就先解決。
+
+**不要叫他把金鑰貼到對話裡。**
+請他自己打開 `.env.local` 填，你用健檢腳本驗證就好：
+
+```bash
+cp .env.example .env.local        # 第一次
+node scripts/setup-doctor.mjs     # 填完跑這個
+```
+
+這支腳本會檢查 13 項的格式並指出哪裡錯、怎麼修，**而且不會印出任何金鑰的值**。
+所以你拿得到診斷結果，卻不會經手他的 token。
+
+**每一步都要驗證，不要相信「我做好了」。**
+使用者說做好了但其實漏一步，是這類安裝最常見的失敗。能驗就驗：
+
+| 做完什麼 | 怎麼驗 |
+|---|---|
+| 填完環境變數 | `node scripts/setup-doctor.mjs` |
+| 拿到 LINE token | `node scripts/setup-doctor.mjs --live`，會印出機器人名稱 |
+| 部署完成 | `node scripts/setup-doctor.mjs --live --url https://他的網址` |
+| 接上 webhook | 請他在 LINE Developers 按 Verify，要看到 Success |
+| 上架選單 | 請他看手機 LINE 底部有沒有出現六格 |
+| 全部完成 | 請他傳一張名片，要收到卡片；**再傳同一張**，要顯示「已併入既有名片」 |
+
+**卡住時先讀錯誤，不要猜。**
+
+```bash
+curl "https://他的網址/api/admin/errors?limit=5" -H "Cookie: ${COOKIE}"
+```
+
+失敗原因會寫在裡面。沒有部署成功到能讀錯誤的程度時，才回頭跑健檢腳本。
+
+#### 最常見的卡關點，先提醒他
 
 1. **Firebase 地區選錯**。Firestore 和 Storage 都要選 `asia-east1`，建立之後不能改
 2. **環境變數少填**。`.env.example` 裡 13 項全部必填，少一項就有功能無聲壞掉
 3. **LINE 的 Auto-reply messages 要關閉**，否則罐頭訊息會蓋掉機器人的回覆
 4. **Vercel 改完環境變數要重新部署才生效**
 5. **`ALLOWED_LINE_USER_IDS` 一定要設**。不設等於任何人加好友都能用，燒的是使用者的 OpenAI 費用
+
+#### 你做不到的事要講清楚
+
+你不能幫他點 Firebase 主控台、不能幫他登入 LINE Developers、不能幫他儲值。
+那些畫面上的操作請他看 [docs/圖解安裝手冊.md](docs/圖解安裝手冊.md)，裡面有圈好位置的截圖。
+
+**不要假裝你看得到他的畫面。** 他說「找不到那個按鈕」時，問他現在在哪一頁、
+看到什麼，而不是重複一次文件上的描述。
 
 ---
 
